@@ -8,13 +8,35 @@ import time
 import base64
 import json
 import typing
-
+import copy
+import traceback
 
 def key_generate():
     return Fernet.generate_key()
 
 def ip():
     return gethostbyname(gethostname())
+
+class InternalKeyError(KeyError):
+    pass
+
+def get_multikey(path, obj, sep='.'):
+    cur = obj.copy()
+    past = ['object']
+    for i in path.split(sep):
+        try:
+            if type(cur) == list:
+                try:
+                    _i = int(i)
+                except ValueError:
+                    raise InternalKeyError(f'Attempted to get string index "{i}" of list at path {".".join(past)}')
+            else:
+                _i = copy.copy(i)
+            cur = cur[i]
+            past.append(i)
+        except KeyError:
+            raise InternalKeyError(f'Key {i} not found at path {".".join(past)}')
+    return cur
 
 class LocalServerHandler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
@@ -23,15 +45,29 @@ class LocalServerHandler(http.server.BaseHTTPRequestHandler):
 
         data = json.loads(node.decode(self.rfile.read(content_len)))
 
-        print(data)
+        command = data['command']
+        args = data['args']
+        kwargs = data['kwargs']
 
-        self.send_response(200)
+        try:
+            resp = get_multikey(command,node.registered_commands)(self, args, kwargs)
+            stat = 200
+        except InternalKeyError:
+            stat = 404
+            resp = f'CMD "{command}" NOT FOUND'
+        except:
+            stat = 500
+            resp = traceback.format_exc()
+
+        self.send_response(stat)
         self.end_headers()
         self.wfile.write(node.encode(json.dumps({
             'timestamp':time.time(),
-            'received':data
+            'response':resp
         })))
         self.wfile.write(b'\n')
+    def log_message(self, format, *args):
+        pass
 
 class LoadedThreadingHTTPServer(http.server.ThreadingHTTPServer):
     def __init__(self, server_address: typing.Tuple[str, int], RequestHandlerClass: typing.Callable[..., LocalServerHandler], node):
@@ -39,6 +75,11 @@ class LoadedThreadingHTTPServer(http.server.ThreadingHTTPServer):
         self.node = node
 
 class Node:
+    # Default commands
+    def _echo(self, request, args, kwargs):
+        return f'Echoed args {str(args)} and kwargs {str(kwargs)} at time [{time.ctime()}]'
+
+    # Threaded Loops
     def launch_advertising_loop(self):
         while self.running:
             data = f'{self.network}.{self.name}|{ip()}:{self.ports["local_server"]}'.encode(
@@ -48,7 +89,7 @@ class Node:
             time.sleep(1)
         self.advertising_socket.close()
 
-    def discover(self, timeout=1.5):
+    def discover(self, timeout=1.5): # Get dict of {peer name: (peer IP, peer port)} for all peers in local network
         s = socket(AF_INET, SOCK_DGRAM)  # create UDP socket
         s.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
         s.bind(('', self.ports['local_advertiser']))
@@ -78,23 +119,31 @@ class Node:
         while self.running:
             self.peers = self.discover()
 
-    def __init__(self, name, network, network_key, ports=[1000, 1001, 1002, 1003], server=None):
+    def __init__(self, name, network, network_key, ports=[1000, 1001], server=None, registered_commands={}):
+        '''
+        name: Name of node in network (cannot contain ".", "|", or ":")
+        network: Name of network (cannot contain ".", "|", or ":")
+        network_key: str encryption key to use within the network
+        ports: [local server port, local UDP advertiser port]
+        server: address or list of addresses of remote middleman servers
+        registered_commands: dict (may be nested to have sub/sub-sub/etc commands) of command names related to functions.
+            Reserved names in top-level tree: __echo__, __list_commands__
+        '''
+
         if '.' in name or '|' in name or ':' in name:
             raise ValueError(
                 f'Node name {name} contains reserved characters (".","|", or ":").')
         if '.' in network or '|' in network or ':' in network:
             raise ValueError(
                 f'Network name {network} contains reserved characters (".","|", or ":").')
-        if len(ports) != 4:
-            raise ValueError('The list of ports to use must contain 4 values.')
+        if len(ports) != 2:
+            raise ValueError('The list of ports to use must contain 2 values.')
         self.network = network
         self.name = name
         self.crypt = Fernet(network_key.encode('utf-8'))
         self.ports = {
             'local_server': ports[0],
-            'local_transmitter': ports[1],
-            'local_advertiser': ports[2],
-            'remote_transciever': ports[3]
+            'local_advertiser': ports[1]
         }
         self.features = {}
         if server == None:
@@ -111,10 +160,13 @@ class Node:
         self.advertising_socket.bind(('', 0))
         self.advertising_socket.setsockopt(SOL_SOCKET, SO_BROADCAST, 1)
         self.advertising_thread = threading.Thread(
-            target=self.launch_advertising_loop, name=f'{self.network}.{self.name}.advertiser')
+            target=self.launch_advertising_loop, name=f'{self.network}.{self.name}.advertiser', daemon=True)
         self.peers = {}
         self.discovery_thread = threading.Thread(
-            target=self.launch_discovery_loop, name=f'{self.network}.{self.name}.discoverer')
+            target=self.launch_discovery_loop, name=f'{self.network}.{self.name}.discoverer', daemon=True)
+        
+        self.registered_commands = registered_commands
+        self.registered_commands['__echo__'] = self._echo
 
     def decode(self, data):  # Recieves encrypted data in base64, returns string of data
         if type(data) == bytes:
@@ -126,7 +178,7 @@ class Node:
         encrypted = self.crypt.encrypt(data.encode('utf-8'))
         return base64.urlsafe_b64encode(encrypted)
 
-    def start(self):
+    def start(self): # Start the node. This method is blocking.
         self.running = True
         self.local_server = LoadedThreadingHTTPServer((ip(),self.ports['local_server']),LocalServerHandler,self)
         self.advertising_thread.start()
@@ -134,14 +186,14 @@ class Node:
 
         self.local_server.serve_forever()
 
-    def start_multithreaded(self, thread_name=None, thread_group=None):
+    def start_multithreaded(self, thread_name=None, thread_group=None): # Start the Node in a separate thread
         proc = threading.Thread(
-            name=thread_name, target=self.start, group=thread_group)
+            name=thread_name, target=self.start, group=thread_group, daemon=True)
         proc.start()
         self.discover()
         return proc
     
-    def send(self,data,target='*',raise_errors=False,timeout=4,mime_type='text/plain'): # send <data> to <target>, returning the response. <target> accepts "*" for all, a list of target names, or a single target name
+    def command(self,command_path='__echo__',args=[],kwargs={},target='*',raise_errors=False,timeout=4): # send <data> to <target>, returning the response. <target> accepts "*" for all, a list of target names, or a single target name
         if target == '*' or target == []:
             targets = list(self.peers.keys())
         elif type(target) == list:
@@ -162,8 +214,9 @@ class Node:
                     url=f'http://{self.peers[i][0]}:{self.peers[i][1]}',
                     data=self.encode(json.dumps({
                         'timestamp':time.time(),
-                        'mime_type':mime_type,
-                        'data':data,
+                        'command':command_path,
+                        'args':args,
+                        'kwargs':kwargs,
                         'initiator':f'{self.network}.{self.name}'
                     })),
                     timeout=timeout
@@ -173,8 +226,39 @@ class Node:
                     raise TimeoutError(f'Attempt to reach peer {i} timed out after {str(timeout)} seconds.')
                 else:
                     returned[i] = None
-            returned[i] = json.loads(self.decode(resp.text))
+            if resp.status_code == 200:
+                returned[i] = json.loads(self.decode(resp.text))
+            else:
+                returned[i] = None
+                print(f'Encountered error with status {str(resp.status_code)}:\n{json.loads(self.decode(resp.text))["response"]}')
         if len(targets) == 1:
             return returned[list(returned.keys())[0]]
         else:
             return returned
+    
+    def register_command(self, command_path, function): # Register <function> at <command_path>
+        try:
+            translated_path = '"]["'.join([i for i in command_path.split('.')])
+            exec(f'self.registered_commands["{translated_path}"] = function', globals(), locals())
+        except KeyError:
+            raise KeyError(f'Unable to register {command_path} as the path to it does not exist.')
+    
+    def register_commands(self, commands, top=None):
+        if top == None:
+            for i in commands.keys():
+                if type(commands[i]) == dict:
+                    cmd = commands[i].copy()
+                else:
+                    cmd = copy.copy(commands[i])
+                self.registered_commands[i] = cmd
+        else:
+            for i in commands.keys():
+                if type(commands[i]) == dict:
+                    cmd = commands[i].copy()
+                else:
+                    cmd = copy.copy(commands[i])
+                try:
+                    translated_path = '"]["'.join([i for i in top.split('.')])
+                    exec(f'self.registered_commands["{translated_path}"][i] = cmd', globals(), locals())
+                except KeyError:
+                    raise KeyError(f'Unable to register commands to {top} as the path to it does not exist.')
