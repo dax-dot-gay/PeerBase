@@ -74,10 +74,22 @@ class LoadedThreadingHTTPServer(http.server.ThreadingHTTPServer):
         super().__init__(server_address, RequestHandlerClass)
         self.node = node
 
+def format_dict(dct, sep='.', start=''):
+    to_ret = []
+    for i in dct.keys():
+        if type(dct[i]) == dict:
+            to_ret.extend(format_dict(dct[i], sep=sep, start=f'{start}{i}.'))
+        else:
+            to_ret.append(start+i)
+    return to_ret
+
 class Node:
     # Default commands
     def _echo(self, request, args, kwargs):
         return f'Echoed args {str(args)} and kwargs {str(kwargs)} at time [{time.ctime()}]'
+    
+    def list_methods(self, request, args, kwargs):
+        return format_dict(self.registered_commands)
 
     # Threaded Loops
     def launch_advertising_loop(self):
@@ -167,6 +179,7 @@ class Node:
         
         self.registered_commands = registered_commands
         self.registered_commands['__echo__'] = self._echo
+        self.registered_commands['__list_commands__'] = self.list_methods
 
     def decode(self, data):  # Recieves encrypted data in base64, returns string of data
         if type(data) == bytes:
@@ -227,7 +240,7 @@ class Node:
                 else:
                     returned[i] = None
             if resp.status_code == 200:
-                returned[i] = json.loads(self.decode(resp.text))
+                returned[i] = json.loads(self.decode(resp.text))['response']
             else:
                 returned[i] = None
                 print(f'Encountered error with status {str(resp.status_code)}:\n{json.loads(self.decode(resp.text))["response"]}')
