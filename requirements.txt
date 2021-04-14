@@ -1,1 +1,4 @@
 cryptography
+requests
+fastapi
+uvicorn
