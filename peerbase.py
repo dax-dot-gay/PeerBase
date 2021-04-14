@@ -75,6 +75,7 @@ class LoadedThreadingHTTPServer(http.server.ThreadingHTTPServer):
         self.node = node
 
 def format_dict(dct, sep='.', start=''):
+    dct = dct.copy()
     to_ret = []
     for i in dct.keys():
         if type(dct[i]) == dict:
@@ -177,7 +178,7 @@ class Node:
         self.discovery_thread = threading.Thread(
             target=self.launch_discovery_loop, name=f'{self.network}.{self.name}.discoverer', daemon=True)
         
-        self.registered_commands = registered_commands
+        self.registered_commands = registered_commands.copy()
         self.registered_commands['__echo__'] = self._echo
         self.registered_commands['__list_commands__'] = self.list_methods
 
@@ -203,7 +204,7 @@ class Node:
         proc = threading.Thread(
             name=thread_name, target=self.start, group=thread_group, daemon=True)
         proc.start()
-        self.discover()
+        self.peers = self.discover()
         return proc
     
     def command(self,command_path='__echo__',args=[],kwargs={},target='*',raise_errors=False,timeout=4): # send <data> to <target>, returning the response. <target> accepts "*" for all, a list of target names, or a single target name
@@ -252,11 +253,11 @@ class Node:
     def register_command(self, command_path, function): # Register <function> at <command_path>
         try:
             translated_path = '"]["'.join([i for i in command_path.split('.')])
-            exec(f'self.registered_commands["{translated_path}"] = function', globals(), locals())
+            exec(f'self.registered_commands["{translated_path}"] = function', globals(), {'self':self, 'function':function})
         except KeyError:
             raise KeyError(f'Unable to register {command_path} as the path to it does not exist.')
     
-    def register_commands(self, commands, top=None):
+    def register_commands(self, commands, top=None): # Register dict of <commands>. If <top> != None, will use <top> as the starting point.
         if top == None:
             for i in commands.keys():
                 if type(commands[i]) == dict:
@@ -272,6 +273,9 @@ class Node:
                     cmd = copy.copy(commands[i])
                 try:
                     translated_path = '"]["'.join([i for i in top.split('.')])
-                    exec(f'self.registered_commands["{translated_path}"][i] = cmd', globals(), locals())
+                    exec(f'self.registered_commands["{translated_path}"][i] = cmd', globals(), {'self':self, 'i':i, 'cmd':cmd})
                 except KeyError:
                     raise KeyError(f'Unable to register commands to {top} as the path to it does not exist.')
+    
+    def get_commands(self, target='*', raise_errors=False, timeout=4): # Utility function to list methods of target(s). Similar args as with command()
+        return self.command(command_path='__list_commands__', target=target, raise_errors=raise_errors, timeout=timeout)
