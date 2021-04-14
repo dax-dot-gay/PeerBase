@@ -91,6 +91,9 @@ class Node:
     
     def list_methods(self, request, args, kwargs):
         return format_dict(self.registered_commands)
+    
+    def get_peers(self, request, args, kwargs):
+        return self.peers
 
     # Threaded Loops
     def launch_advertising_loop(self):
@@ -140,7 +143,7 @@ class Node:
         ports: [local server port, local UDP advertiser port]
         server: address or list of addresses of remote middleman servers
         registered_commands: dict (may be nested to have sub/sub-sub/etc commands) of command names related to functions.
-            Reserved names in top-level tree: __echo__, __list_commands__
+            Reserved names in top-level tree: __echo__, __list_commands__, __peers__
         '''
 
         if '.' in name or '|' in name or ':' in name:
@@ -181,6 +184,7 @@ class Node:
         self.registered_commands = registered_commands.copy()
         self.registered_commands['__echo__'] = self._echo
         self.registered_commands['__list_commands__'] = self.list_methods
+        self.registered_commands['__peers__'] = self.get_peers
 
     def decode(self, data):  # Recieves encrypted data in base64, returns string of data
         if type(data) == bytes:
