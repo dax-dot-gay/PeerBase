@@ -11,6 +11,9 @@ High-level p2p protocol allowing both local and remote p2p connections via UDP a
 - RPC functionality
 - Command paths
 
+## Installation
+Run `python -m pip install --upgrade peerbase`.
+
 ## Documentation (Basics)
 The following documentation is laid out in the order in which functions should generally be called.
 
@@ -44,16 +47,16 @@ The function should return a JSON-encodeable value. The `command_path` argument 
 
 `Node().register_commands(commands, top=None)` - Registers a dictionary of commands and subcommands at `top`. `top` should be a path to a command root, using the same path syntax as in `command_path` in `Node().register_command()`. The dictionary should follow the following syntax, which should also be used in the `registered_commands` argument of `Node()`:
 
-```
+```json
 {
-"path":{
-"to":{
-"function":function(node, args, kwargs)
-},
-"function":function(node, args, kwargs)
-},
-"function":function(node, args, kwargs)
-}
+  "path":{
+    "to":{
+        "function":function(node, args, kwargs)
+      },
+      "function":function(node, args, kwargs)
+    },
+    "function":function(node, args, kwargs)
+  }
 ```
 Any number of paths and functions can be specified in this function.
 
