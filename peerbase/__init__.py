@@ -9,7 +9,7 @@ import json
 import typing
 import copy
 import traceback
-from .peer_utils import *
+from peerbase.peer_utils import *
 import random
 import hashlib
 from concurrent.futures import ThreadPoolExecutor

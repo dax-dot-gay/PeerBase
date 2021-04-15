@@ -3,7 +3,7 @@ from starlette.status import HTTP_404_NOT_FOUND
 import uvicorn
 from fastapi import status, FastAPI, Request, Response
 try:
-    from .peer_utils import *
+    from peerbase.peer_utils import *
 except ImportError:
     from peer_utils import *
 from threading import Thread
