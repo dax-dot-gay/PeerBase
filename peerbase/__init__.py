@@ -304,6 +304,101 @@ class Node:
             self.peers = self.discover()
         return proc
 
+    def _command_one(self, command_path, args, kwargs, target, raise_errors, timeout):
+        ret = None
+        i = target
+        if i in self.peers.keys() and self.features['local']:
+            '''if raise_errors:
+                raise LookupError(
+                    f'Could not find target {i} in peers. Available peers: {str(len(self.peers.keys()))}')
+            else:
+                continue'''
+            try:
+                resp = requests.post(
+                    url=f'http://{self.peers[i][0]}:{self.peers[i][1]}',
+                    data=self.encode(json.dumps({
+                        'timestamp': time.time(),
+                        'command': command_path,
+                        'args': args,
+                        'kwargs': kwargs,
+                        'initiator': f'{self.network}.{self.name}'
+                    })),
+                    timeout=timeout
+                )
+            except requests.Timeout:
+                if raise_errors:
+                    raise TimeoutError(
+                        f'Attempt to reach peer {i} timed out after {str(timeout)} seconds.')
+                else:
+                    ret = None
+            if resp.status_code == 200:
+                ret = json.loads(self.decode(resp.text))[
+                    'response']
+            else:
+                ret = None
+                print(
+                    f'Encountered error with status {str(resp.status_code)}:\n{json.loads(self.decode(resp.text))["response"]}')
+        elif i in self.remote_peers.keys() and self.features['remote']:
+            while len(self.remote_peers[i]) > 0 and ret == None:
+                remote_target = random.choice(list(self.remote_peers[i]))
+                pid = hashlib.sha256(
+                    str(time.time() + random.random()).encode('utf-8')).hexdigest()
+                try:
+                    resp = requests.post(
+                        url=f'http://{remote_target}/send/',
+                        json={
+                            'target': i,
+                            'data': self.encode(json.dumps({
+                                'timestamp': time.time(),
+                                'command': command_path,
+                                'args': args,
+                                'kwargs': kwargs,
+                                'initiator': f'{self.network}.{self.name}'
+                            })).decode('utf-8'),
+                            'packet_id': pid,
+                            'originator': self.name,
+                            'r_type': 'request',
+                            'remote_addr': remote_target
+                        }
+                    )
+                    if resp.status_code != 200:
+                        raise requests.ConnectionError
+                    wait_start = time.time()
+                    if timeout == None:
+                        _t = -1
+                    else:
+                        _t = timeout + 0
+                    while not pid in self.remote_buffer.keys() and (wait_start + _t > time.time() or _t == -1):
+                        pass
+                    if pid in self.remote_buffer.keys():
+                        res = json.loads(self.decode(
+                            copy.deepcopy(self.remote_buffer[pid])['data']))
+                        if res['status'] == 200:
+                            ret = res['result']
+                        else:
+                            print(
+                                f'Encountered error with status {str(res["status"])}:\n{res["result"]}')
+                        del self.remote_buffer[pid]
+                    else:
+                        raise requests.ConnectionError
+                except (requests.ConnectionError, requests.TimeoutError):
+                    del self.remote_peers[i]
+            if ret == None:
+                if raise_errors:
+                    raise TimeoutError(
+                        f'Attempt to reach peer {i} remotely failed.')
+                else:
+                    pass
+                    
+        else:
+            if raise_errors:
+                raise LookupError(
+                    f'Could not find target {i} in remote peers. Available peers: {str(len(self.remote_peers.keys()))}')
+            else:
+                pass
+        
+        return ret
+
     # send <data> to <target>, returning the response. <target> accepts "*" for all, a list of target names, or a single target name
     def command(self, command_path='__echo__', args=[], kwargs={}, target='*', raise_errors=False, timeout=5, max_threads=32):
         if target == '*' or target == []:
@@ -314,99 +409,10 @@ class Node:
         else:
             targets = [target]
 
-        returned = {}
-
-        for i in targets:
-            if i in self.peers.keys() and self.features['local']:
-                '''if raise_errors:
-                    raise LookupError(
-                        f'Could not find target {i} in peers. Available peers: {str(len(self.peers.keys()))}')
-                else:
-                    continue'''
-                try:
-                    resp = requests.post(
-                        url=f'http://{self.peers[i][0]}:{self.peers[i][1]}',
-                        data=self.encode(json.dumps({
-                            'timestamp': time.time(),
-                            'command': command_path,
-                            'args': args,
-                            'kwargs': kwargs,
-                            'initiator': f'{self.network}.{self.name}'
-                        })),
-                        timeout=timeout
-                    )
-                except requests.Timeout:
-                    if raise_errors:
-                        raise TimeoutError(
-                            f'Attempt to reach peer {i} timed out after {str(timeout)} seconds.')
-                    else:
-                        returned[i] = None
-                if resp.status_code == 200:
-                    returned[i] = json.loads(self.decode(resp.text))[
-                        'response']
-                else:
-                    returned[i] = None
-                    print(
-                        f'Encountered error with status {str(resp.status_code)}:\n{json.loads(self.decode(resp.text))["response"]}')
-            elif i in self.remote_peers.keys() and self.features['remote']:
-                while len(self.remote_peers[i]) > 0 and not i in returned.keys():
-                    remote_target = random.choice(list(self.remote_peers[i]))
-                    pid = hashlib.sha256(
-                        str(time.time() + random.random()).encode('utf-8')).hexdigest()
-                    try:
-                        resp = requests.post(
-                            url=f'http://{remote_target}/send/',
-                            json={
-                                'target': i,
-                                'data': self.encode(json.dumps({
-                                    'timestamp': time.time(),
-                                    'command': command_path,
-                                    'args': args,
-                                    'kwargs': kwargs,
-                                    'initiator': f'{self.network}.{self.name}'
-                                })).decode('utf-8'),
-                                'packet_id': pid,
-                                'originator': self.name,
-                                'r_type': 'request',
-                                'remote_addr': remote_target
-                            }
-                        )
-                        if resp.status_code != 200:
-                            raise requests.ConnectionError
-                        wait_start = time.time()
-                        if timeout == None:
-                            _t = -1
-                        else:
-                            _t = timeout + 0
-                        while not pid in self.remote_buffer.keys() and (wait_start + _t > time.time() or _t == -1):
-                            pass
-                        if pid in self.remote_buffer.keys():
-                            res = json.loads(self.decode(
-                                copy.deepcopy(self.remote_buffer[pid])['data']))
-                            if res['status'] == 200:
-                                returned[i] = res['result']
-                            else:
-                                returned[i] = None
-                                print(
-                                    f'Encountered error with status {str(res["status"])}:\n{res["result"]}')
-                            del self.remote_buffer[pid]
-                        else:
-                            raise requests.ConnectionError
-                    except (requests.ConnectionError, requests.TimeoutError):
-                        del self.remote_peers[i]
-                if not i in returned.keys():
-                    if raise_errors:
-                        raise TimeoutError(
-                            f'Attempt to reach peer {i} remotely failed.')
-                    else:
-                        returned[i] = None
-                        
-            else:
-                if raise_errors:
-                    raise LookupError(
-                        f'Could not find target {i} in remote peers. Available peers: {str(len(self.remote_peers.keys()))}')
-                else:
-                    continue
+        with ThreadPoolExecutor(max_workers=max_threads) as executor:
+            returned = {i:executor.submit(self._command_one,command_path,args,kwargs,target,raise_errors,timeout) for i in targets}
+        
+        returned = {i:returned[i].result() for i in returned.keys()}
         if len(targets) == 1:
             return returned[list(returned.keys())[0]]
         else:
