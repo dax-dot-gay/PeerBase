@@ -14,6 +14,7 @@ from pydantic import BaseModel
 import os
 import logging
 import time
+import requests
 
 logging.basicConfig(format='%(levelname)s:%(message)s',level=0)
 
@@ -54,14 +55,15 @@ class Relay:
     def save_state(self):
         if self.save_location:
             with open(self.save_location, 'w') as f:
-                json.dump({
+                state = {
                     'port': self.port,
                     'network_name': self.network_name,
                     'save_location': self.save_location,
                     'peers': self.peers,
                     'altservers': list(self.altservers),
                     'clear_time': self.clear_time
-                }, f)
+                }
+                json.dump(state, f)
 
     def decode(self, data):  # Recieves encrypted data in base64, returns string of data
         if type(data) == bytes:
@@ -159,11 +161,32 @@ def check_peers_loop():
         for i in list(relay.peers.keys()):
             if relay.peers[i]['timeout'] + relay.clear_time < time.time():
                 del relay.peers[i]
+        time.sleep(relay.clear_time)
+
+def check_altservers_loop():
+    global relay
+    while True:
+        for s in list(relay.altservers):
+            try:
+                requests.get(s)
+            except requests.ConnectionError:
+                relay.altservers.remove(s)
+        time.sleep(30)
+
+def save_state_loop():
+    global relay
+    while True:
+        relay.save_state()
+        time.sleep(5)
 
 check_peers_thread = Thread(target=check_peers_loop, name='peerbase.relay.check_peers', daemon=True)
+check_altservers_thread = Thread(target=check_altservers_loop, name='peerbase.relay.check_altservers', daemon=True)
+save_state_thread = Thread(target=save_state_loop, name='peerbase.relay.save_state', daemon=True)
 
 if __name__ == '__main__':
     print([i.path for i in app.routes])
     logging.info(f'Starting relay server on http://{ip()}:{str(relay.port)}')
     check_peers_thread.start()
+    check_altservers_thread.start()
+    save_state_thread.start()
     uvicorn.run('relay:app', host=ip(), port=relay.port, access_log=False)

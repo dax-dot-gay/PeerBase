@@ -410,7 +410,7 @@ class Node:
             targets = [target]
 
         with ThreadPoolExecutor(max_workers=max_threads) as executor:
-            returned = {i:executor.submit(self._command_one,command_path,args,kwargs,target,raise_errors,timeout) for i in targets}
+            returned = {i:executor.submit(self._command_one,command_path,args,kwargs,i,raise_errors,timeout) for i in targets}
         
         returned = {i:returned[i].result() for i in returned.keys()}
         if len(targets) == 1:

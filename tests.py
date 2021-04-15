@@ -23,13 +23,8 @@ node2.register_commands({
 })
 node2.register_command('user_defined.sublevel.echo',_echo)
 
-print(node1.peers, node2.peers, node3.peers)
-print('__echo__:                   ', node1.command(args=['test'], kwargs={'test':1}, target='*'))
-print('user_defined.echo:          ', node1.command(command_path='user_defined.echo',args=['test'], kwargs={'test':1}, target='node2'))
-print('user_defined.sublevel.echo: ', node1.command(command_path='user_defined.sublevel.echo',args=['test'], kwargs={'test':1}, target='node2'))
-print('Formatted command list:     ', node1.get_commands())
-
 while True:
     #print(node2.peers, node2.remote_peers)
     if 'node3' in node2.remote_peers.keys():
-        print(node2.command(target='node3'))
+        print(node2.get_commands())
+    time.sleep(2)
