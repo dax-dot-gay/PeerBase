@@ -158,7 +158,7 @@ class Node:
                             self.remote_peers[i].add(target)
 
                 for s in dat['servers']:
-                    if not s in self.server_info.keys():
+                    if not s in self.server_info.keys() and len(self.server_info.keys()) < self.max_remotes:
                         self.server_info[s] = {
                             'maintain': False,
                             'active': True,
@@ -253,6 +253,7 @@ class Node:
             raise ValueError(
                 'Must enable either local or remote connections, or both.')
 
+        self.max_remotes = max_remotes
         self.local_server = None
         self.running = False
         self.advertising_socket = socket(AF_INET, SOCK_DGRAM)
@@ -399,7 +400,6 @@ class Node:
         
         return ret
 
-    # send <data> to <target>, returning the response. <target> accepts "*" for all, a list of target names, or a single target name
     def command(self, command_path='__echo__', args=[], kwargs={}, target='*', raise_errors=False, timeout=5, max_threads=32):
         if target == '*' or target == []:
             targets = list(self.peers.keys())
