@@ -1,10 +1,15 @@
-from distutils.core import setup
+from setuptools import setup
+with open("README.md", encoding='utf-8') as f:
+    readme = f.read()
+
 setup(
   name = 'peerbase',         # How you named your package folder (MyLib)
   packages = ['peerbase'],   # Chose the same as "name"
-  version = '0.2',      # Start with a small number and increase it with every change you make
+  version = '0.3.1',      # Start with a small number and increase it with every change you make
   license='MIT',        # Chose a license from here: https://help.github.com/articles/licensing-a-repository
   description = 'High-level p2p protocol allowing both local and remote p2p connections via UDP advertising and a TURN-like middleman server (or multiple)',   # Give a short description about your library
+  long_description_content_type="text/markdown",
+  long_description=readme,
   author = 'iTecX',                   # Type in your name
   author_email = 'matteovh@gmail.com',      # Type in your E-Mail
   url = 'https://github.com/iTecAI/PeerBase',   # Provide either the link to your github or to your website

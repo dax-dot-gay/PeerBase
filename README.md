@@ -1,18 +1,6 @@
 # PeerBase
 High-level p2p protocol allowing both local and remote p2p connections via UDP advertising and a TURN-like middleman server (or multiple)
 
-## Table of Contents
-- [PeerBase](#peerbase)
-  - [Table of Contents](#table-of-contents)
-  - [Features](#features)
-  - [Documentation (Basics)](#documentation-basics)
-    - [Main Class: `Node()`](#main-class-node)
-      - [Registering Commands](#registering-commands)
-      - [Starting the Node](#starting-the-node)
-      - [Commanding Alternate Nodes](#commanding-alternate-nodes)
-    - [Relay Servers](#relay-servers)
-
-
 ## Features
 - High-level abstraction of remote/local node commands
 - Discovery of alternate relay servers via reporting from other nodes
@@ -51,19 +39,20 @@ Commands can (and should) be registered in Node instances to allow RPC functiona
   - `node` - The Node instance
   - `args` - A list of positional arguments
   - `kwargs` - A dictionary of keyword arguments
+
 The function should return a JSON-encodeable value. The `command_path` argument should be the command name. If the command exists as a subcommand, separate path elements with periods like so: `path.to.function`.
 
 `Node().register_commands(commands, top=None)` - Registers a dictionary of commands and subcommands at `top`. `top` should be a path to a command root, using the same path syntax as in `command_path` in `Node().register_command()`. The dictionary should follow the following syntax, which should also be used in the `registered_commands` argument of `Node()`:
 
-```json
+```
 {
-    "path":{
-        "to":{
-            "function":function(node, args, kwargs)
-        },
-        "function":function(node, args, kwargs)
-    },
-    "function":function(node, args, kwargs)
+"path":{
+"to":{
+"function":function(node, args, kwargs)
+},
+"function":function(node, args, kwargs)
+},
+"function":function(node, args, kwargs)
 }
 ```
 Any number of paths and functions can be specified in this function.
