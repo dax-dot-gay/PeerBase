@@ -165,7 +165,7 @@ class Node:
                             'peers': set(),
                             'thread': threading.Thread(target=self.remote_keepalive_loop, args=[s], name=f'{self.network}.{self.name}.remote_keepalive[{s}]', daemon=True)
                         }
-                        self.server_info[s].start()
+                        self.server_info[s]['thread'].start()
 
                 for b in dat['buffer'].keys():
                     if dat['buffer'][b]['type'] == 'response':
@@ -381,7 +381,7 @@ class Node:
                         del self.remote_buffer[pid]
                     else:
                         raise requests.ConnectionError
-                except (requests.ConnectionError, requests.TimeoutError):
+                except (requests.ConnectionError, requests.Timeout):
                     del self.remote_peers[i]
             if ret == None:
                 if raise_errors:
