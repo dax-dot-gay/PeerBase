@@ -383,8 +383,9 @@ class Node:
                     else:
                         raise requests.ConnectionError
                 except (requests.ConnectionError, requests.Timeout):
-                    del self.remote_peers[i]
+                    self.remote_peers[i].remove(remote_target)
             if ret == None:
+                del self.remote_peers[i]
                 if raise_errors:
                     raise TimeoutError(
                         f'Attempt to reach peer {i} remotely failed.')
