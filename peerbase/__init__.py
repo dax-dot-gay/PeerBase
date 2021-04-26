@@ -147,6 +147,7 @@ class Node:
             try:
                 resp = requests.post(f'http://{target}/ping/', json={
                     'node_name': self.name,
+                    'node_network': self.network,
                     'known_servers': list(self.server_info.keys())
                 })
                 dat = resp.json()
@@ -254,6 +255,8 @@ class Node:
                 'Must enable either local or remote connections, or both.')
 
         self.max_remotes = max_remotes
+        if self.max_remotes == None:
+            self.max_remotes = 1e99
         self.local_server = None
         self.running = False
         self.advertising_socket = socket(AF_INET, SOCK_DGRAM)
