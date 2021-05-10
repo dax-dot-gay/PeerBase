@@ -21,9 +21,10 @@ logging.basicConfig(format='%(levelname)s:%(message)s',level=0)
 app = FastAPI()
 
 class Relay:
-    def __init__(self, port, clear_time=1.5, save_to=None, peers={}, altservers=[]):
-        logging.info(f'Instantiating relay on port {str(port)}.')
+    def __init__(self, port, network_name, clear_time=1.5, save_to=None, peers={}, altservers=[]):
+        logging.info(f'Instantiating relay on port {str(port)} in network {network_name}.')
         self.port = port
+        self.network_name = network_name
         self.peers = peers
         self.altservers = set(altservers)
         self.save_location = save_to
@@ -36,7 +37,7 @@ class Relay:
         logging.info(f'Loading new relay from config file {path}.')
         with open(path, 'r') as f:
             conf = json.load(f)
-        return cls(conf['port'], save_to=conf['save_location'], clear_time=conf['clear_time'])
+        return cls(conf['port'], conf['network_name'], save_to=conf['save_location'], clear_time=conf['clear_time'])
 
     @classmethod
     def from_state(cls, path, config=None):  # Load saved instance from JSON file
@@ -44,7 +45,7 @@ class Relay:
         if os.path.exists(path):
             with open(path, 'r') as f:
                 conf = json.load(f)
-            return cls(conf['port'], save_to=conf['save_location'], peers=conf['peers'], altservers=conf['altservers'], clear_time=conf['clear_time'])
+            return cls(conf['port'], conf['network_name'], save_to=conf['save_location'], peers=conf['peers'], altservers=conf['altservers'], clear_time=conf['clear_time'])
         elif config:
             logging.warning(f'No state file found at {path}. Loading new instance from config file {config}')
             return cls.from_config(config)
@@ -56,6 +57,7 @@ class Relay:
             with open(self.save_location, 'w') as f:
                 state = {
                     'port': self.port,
+                    'network_name': self.network_name,
                     'save_location': self.save_location,
                     'peers': self.peers,
                     'altservers': list(self.altservers),
@@ -82,6 +84,7 @@ parser.add_argument(
     '--config', help='Path to config file. If not specified, will default to using alternate arguments', default=None)
 parser.add_argument(
     '--port', help='Port to run relay server on.', default=0, type=int)
+parser.add_argument('--network', help='Name of network', default=None)
 parser.add_argument(
     '--saveloc', help='Location to save the server state to. Defaults to None, in which case no states will be saved.', default=None)
 parser.add_argument(
@@ -93,8 +96,8 @@ if args.state:
     relay = Relay.from_state(args.state, config=args.config)
 elif args.config:
     relay = Relay.from_config(args.config)
-elif args.port > 0:
-    relay = Relay(args.port,
+elif args.port > 0 and args.network:
+    relay = Relay(args.port, args.network,
                     save_to=args.saveloc, clear_time=args.timeout)
 else:
     raise ValueError(
@@ -103,7 +106,6 @@ else:
 # Define endpoints
 class PingRequestModel(BaseModel):
     node_name: str
-    node_network: str
     known_servers: list
 
 @app.get('/')
@@ -113,22 +115,23 @@ async def root():
 @app.post('/ping')
 async def ping(model: PingRequestModel, request: Request, response: Response):
     global relay
-    if not model.node_network in relay.peers.keys():
-        relay.peers[model.node_network] = {}
-    if model.node_name in relay.peers[model.node_network].keys():
-        relay.peers[model.node_network][model.node_name]['timeout'] = time.time()
+    if model.node_name in relay.peers.keys():
+        relay.peers[model.node_name]['timeout'] = time.time()
     else:
-        relay.peers[model.node_network][model.node_name] = {
+        relay.peers[model.node_name] = {
             'timeout':time.time(),
             'buffer':{}
         }
     for s in model.known_servers:
         if not s in relay.altservers:
             relay.altservers.add(s)
-    buf = relay.peers[model.node_network][model.node_name]['buffer'].copy()
-    relay.peers[model.node_network][model.node_name]['buffer'] = {}
+    buf = relay.peers[model.node_name]['buffer'].copy()
+    relay.peers[model.node_name]['buffer'] = {}
+    for i in list(relay.peers.keys()):
+        if relay.peers[i]['timeout'] + relay.clear_time < time.time():
+            del relay.peers[i]
     return {
-        'peers': list(relay.peers[model.node_network].keys()),
+        'peers': list(relay.peers.keys()),
         'servers': list(relay.altservers),
         'buffer': buf
     }
@@ -144,18 +147,10 @@ class SendDataRequestModel(BaseModel):
 @app.post('/send')
 async def send(model: SendDataRequestModel, request: Request, response: Response):
     global relay
-    serv = None
-    for i in relay.peers.keys():
-        if model.originator in relay.peers[i].keys():
-            serv = i
-            break
-    if serv == None:
-        response.status_code = status.HTTP_404_NOT_FOUND
-        return {'detail':f'originator {model.originator} is not in any known servers.'}
-    if not model.target in relay.peers[serv].keys():
+    if not model.target in relay.peers.keys():
         response.status_code = status.HTTP_404_NOT_FOUND
         return {'detail':f'target {model.target} not found in peers.'}
-    relay.peers[serv][model.target]['buffer'][model.packet_id] = {
+    relay.peers[model.target]['buffer'][model.packet_id] = {
         'originator': model.originator,
         'data': model.data,
         'type': model.r_type,
@@ -166,12 +161,9 @@ async def send(model: SendDataRequestModel, request: Request, response: Response
 def check_peers_loop():
     global relay
     while True:
-        for s in list(relay.peers.keys()):
-            for i in list(relay.peers[s].keys()):
-                if relay.peers[s][i]['timeout'] + relay.clear_time < time.time():
-                    del relay.peers[s][i]
-            if len(relay.peers[s].keys()) == 0:
-                del relay.peers[s]
+        for i in list(relay.peers.keys()):
+            if relay.peers[i]['timeout'] + relay.clear_time < time.time():
+                del relay.peers[i]
         time.sleep(relay.clear_time)
 
 def check_altservers_loop():
