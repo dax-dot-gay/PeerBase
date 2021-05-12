@@ -21,10 +21,9 @@ logging.basicConfig(format='%(levelname)s:%(message)s',level=0)
 app = FastAPI()
 
 class Relay:
-    def __init__(self, port, network_name, clear_time=1.5, save_to=None, peers={}, altservers=[]):
-        logging.info(f'Instantiating relay on port {str(port)} in network {network_name}.')
+    def __init__(self, port, clear_time=1.5, save_to=None, peers={}, altservers=[]):
+        logging.info(f'Instantiating relay on port {str(port)}.')
         self.port = port
-        self.network_name = network_name
         self.peers = peers
         self.altservers = set(altservers)
         self.save_location = save_to
@@ -37,7 +36,7 @@ class Relay:
         logging.info(f'Loading new relay from config file {path}.')
         with open(path, 'r') as f:
             conf = json.load(f)
-        return cls(conf['port'], conf['network_name'], save_to=conf['save_location'], clear_time=conf['clear_time'])
+        return cls(conf['port'], save_to=conf['save_location'], clear_time=conf['clear_time'])
 
     @classmethod
     def from_state(cls, path, config=None):  # Load saved instance from JSON file
@@ -45,7 +44,7 @@ class Relay:
         if os.path.exists(path):
             with open(path, 'r') as f:
                 conf = json.load(f)
-            return cls(conf['port'], conf['network_name'], save_to=conf['save_location'], peers=conf['peers'], altservers=conf['altservers'], clear_time=conf['clear_time'])
+            return cls(conf['port'], save_to=conf['save_location'], peers=conf['peers'], altservers=conf['altservers'], clear_time=conf['clear_time'])
         elif config:
             logging.warning(f'No state file found at {path}. Loading new instance from config file {config}')
             return cls.from_config(config)
@@ -57,7 +56,6 @@ class Relay:
             with open(self.save_location, 'w') as f:
                 state = {
                     'port': self.port,
-                    'network_name': self.network_name,
                     'save_location': self.save_location,
                     'peers': self.peers,
                     'altservers': list(self.altservers),
@@ -96,12 +94,12 @@ if args.state:
     relay = Relay.from_state(args.state, config=args.config)
 elif args.config:
     relay = Relay.from_config(args.config)
-elif args.port > 0 and args.network:
-    relay = Relay(args.port, args.network,
+elif args.port > 0:
+    relay = Relay(args.port, 
                     save_to=args.saveloc, clear_time=args.timeout)
 else:
     raise ValueError(
-        'Please include --state, --config, or [--port, --network, and optionally --saveloc]')
+        'Please include --state, --config, or [--port, and optionally --saveloc]')
 
 # Define endpoints
 class PingRequestModel(BaseModel):
@@ -122,6 +120,7 @@ async def ping(model: PingRequestModel, request: Request, response: Response):
             'timeout':time.time(),
             'buffer':{}
         }
+        logging.info(f'New connection from {model.node_name}')
     for s in model.known_servers:
         if not s in relay.altservers:
             relay.altservers.add(s)
@@ -147,6 +146,7 @@ class SendDataRequestModel(BaseModel):
 @app.post('/send')
 async def send(model: SendDataRequestModel, request: Request, response: Response):
     global relay
+    logging.info(f'Packet {model.originator} -> {model.target}')
     if not model.target in relay.peers.keys():
         response.status_code = status.HTTP_404_NOT_FOUND
         return {'detail':f'target {model.target} not found in peers.'}
